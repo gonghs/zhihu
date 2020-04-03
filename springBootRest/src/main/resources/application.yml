@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/rest
+    username: root
+    password: maple
+  jpa:
+    hibernate:
+#\u8BA9hibernate\u81EA\u52A8\u5E2E\u6211\u4EEC\u5EFA\u8868
+      ddl-auto: update

@@ -1,0 +1,459 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.springframework.org/schema/data/jaxb">
+<head>
+    <meta charset="UTF-8">
+    <title>vue上传封装</title>
+    <link rel="stylesheet" type="text/css" th:href="@{/css/bootstrap.css}"/>
+    <style>
+        .imgList-li {
+            display: inline-block;
+            list-style-type: none;
+        }
+
+        .dropAreas {
+            display: inline-flex;
+        }
+
+        .dropArea1 {
+            width: 500px;
+            height: 300px;
+            border: 1px solid #00b7ee;
+        }
+
+        .dropArea2 {
+            width: 500px;
+            height: 300px;
+            border: 1px solid #00b7ee;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid">
+    <div class="dropAreas">
+        <div class="dropArea1"><div class="text-center">拖拽区域1</div></div>
+        <div class="dropArea2"><div class="text-center">拖拽区域2</div></div>
+    </div>
+    <div id="app">
+        <my-uploader btn-name="上传" upload-url="/uploadFile" server-upload accept="image/jpeg"
+                     @on-upload-before-send="uploadBeforeSend" auto-upload auto-accept
+                     @on-check-error="checkError" ref="btn1"
+                     @on-upload-success="uploadSuccess" drop-area=".dropArea1"
+                     @on-upload-error="uploadError"></my-uploader>
+        <my-uploader btn-name="前端直传" policy-url="/upload/getPolicy"
+                     :upload-params="uploadParams" auto-upload
+                     @on-upload-before-send="uploadBeforeSend"
+                     @on-check-error="checkError" ref="btn2"
+                     @on-upload-success="uploadSuccess" drop-area=".dropArea2"
+                     @on-upload-error="uploadError"></my-uploader>
+    </div>
+</div>
+
+
+<template id="uploader">
+    <div>
+        <label :for="id" class="btn btn-primary">
+            <span>{{btnName}}</span>
+            <input type="file" :id="id" @change="btnClick" style="display: none" multiple="multiple" :accept="autoAccept?accept:''">
+        </label>
+        <ul>
+            <li v-for="file in getFileListByStatus('1',false)" class="imgList-li">
+                状态:{{statusList[file.unique]}}进度信息:{{processList[file.unique]}}
+                <img src="" :src="file.src" width="60px" height="60px" :title="file.name">
+            </li>
+        </ul>
+    </div>
+</template>
+
+<script type="text/javascript" th:src="@{js/jquery.js}"></script>
+<script type="text/javascript" th:src="@{js/layer/layer.js}"></script>
+<script type="text/javascript" th:src="@{js/vue/vue.js}"></script>
+<script type="text/javascript" th:src="@{js/es6/browser.min.js}"></script>
+<script type="text/javascript" th:src="@{js/utils/commUtils.js}"></script>
+<script type="text/javascript">
+        const statusCode = {
+            //初始化状态
+            init: '0',
+            //校验阶段失败
+            checkError:'1',
+            //上传之前
+            uploadBefore: '2',
+            //上传中
+            uploadProcess: '3',
+            //上传成功
+            uploadSuccess: '4',
+            //上传失败
+            uploadError: '5'
+        };
+        const checkErrorCode = {
+            //文件数目超出
+            fileNumOverFlow:'01',
+            //文件总长度超出
+            fileSizeOverFlow:'02',
+            //单文件长度溢出
+            singleFileSizeOverFlow:'03',
+            //文件重复
+            fileRepeat:'04',
+            //文件类型错误
+            fileTypeError:'05'
+        };
+    Vue.component('my-uploader', {
+        template: '#uploader',
+        props: {
+            //按钮名称
+            btnName: {
+                type: String,
+                default: '文件上传'
+            },
+            //上传文件的路径
+            uploadUrl: {
+                type: String
+            },
+            //上传文件附带的参数
+            uploadParams: {
+                type: Object,
+                default: function () {
+                    return {
+                        dir: 'files'
+                    }
+                }
+            },
+            //传入则关闭直传
+            serverUpload: {
+                type: [Boolean, String]
+            },
+            // 获取阿里云上传参数的url
+            policyUrl: {
+                type: String
+            },
+            //是否自动上传 如果传入则代表自动上传
+            autoUpload: {
+                type: [Boolean, String],
+                default: false
+            },
+            //拖拽上传的区域
+            dropArea: {
+                type: [String]
+            },
+            //文件数目的限制
+            fileNumLimit:{
+                type: [Number],
+                default: 10
+            },
+            //单个文件长度的限制
+            fileSingleSizeLimit:{
+                type: [Number],
+                default: 5*1024*1024
+            },
+            //文件总长度的限制
+            fileSizeLimit:{
+                type: [Number],
+                default: 50*1024*1024
+            },
+            //接收文件类型
+            accept:{
+                type: [String]
+            },
+            //传入则将accept属性绑定在标签上  文件弹窗自动过滤  加这个属性主要是因为有些浏览器对某种文件类型过滤会卡顿，并且这个属性浏览器支持比较少 通常不开启
+            //例如谷歌对edc文件
+            autoAccept:{
+                type: [Boolean, String],
+                default: false
+            },
+            defaultImgUrl:{
+                type: [String],
+            }
+        },
+        data: function () {
+            return {
+                initStatus: true,
+                fileList: [],
+                id: commUtils.getUUid(),
+                myUploadUrl: this.uploadUrl,
+                params: this.uploadParams,
+                //存储所有文件的进度信息
+                processList: {},
+                //存储所有文件的状态信息
+                statusList: {},
+            }
+        },
+        methods: {
+            //上传文件的ajax方法
+            ajaxUploadFile: function (data = this.params, headers = {}, unique, _self = this) {
+                return $.ajax({
+                    url: this.myUploadUrl,
+                    headers: headers,
+                    data: data,
+                    type: "Post",
+                    dataType: "json",
+                    cache: false,//上传文件无需缓存
+                    processData: false,//用于对data参数进行序列化处理 这里必须false
+                    contentType: false, //必须
+                    //监听进度信息
+                    xhr: function () {
+                        //获取原生的xhr对象
+                        let xhr = $.ajaxSettings.xhr();
+                        if (xhr.upload) {
+                            //添加 progress 事件监听
+                            xhr.upload.addEventListener('progress', function (e) {
+                                _self.processList[unique] = parseInt(e.loaded / e.total * 100);
+                            }, false);
+                        }
+                        return xhr;
+                    }
+                })
+            },
+            //获取上传参数
+            ajaxGetPolicy: function (data = this.params, headers = {}) {
+                return $.ajax({
+                    type: "POST",
+                    headers: headers,
+                    url: this.policyUrl,
+                    data: JSON.stringify(data),
+                    async: false,
+                    cache: false,
+                    contentType: "application/json",
+                    dataType: "json"
+                })
+            },
+            //根据状态获取文件列表  第二个参数代表是否相等
+            getFileListByStatus: function (status,equals = true) {
+                let fileList = [];
+                let keyArr = Object.keys(this.statusList).filter(key => equals?this.statusList[key] === status:this.statusList[key] !== status);
+                keyArr.forEach(item => {
+                    fileList.push(...this.fileList.filter(file => file.unique === item));
+                });
+                return fileList;
+            },
+            //上传前的参数检验
+            checkData: function () {
+                if (this.serverUpload) {
+                    if (!this.uploadUrl) {
+                        this.initStatus = false;
+                        throw new Error('请传入上传路径');
+                    }
+                } else {
+                    if (!this.policyUrl) {
+                        this.initStatus = false;
+                        throw new Error('请传入policy路径');
+                    }
+                }
+            },
+            //校验所有文件 此处校验不通过将阻止文件上传 第一个参数为接收的文件列表（单文件校验只需要校验当前新加入的文件）
+            checkAllFile:function(acceptList,fileList = this.getFileListByStatus(statusCode.checkError,false)){
+                //校验文件数目
+                if(fileList.length>this.fileNumLimit){
+                    this.$emit('on-check-error', checkErrorCode.fileNumOverFlow);
+                    return false;
+                }
+                //校验文件长度
+                let size = fileList.map(item => item.size).reduce((pre,cur) => pre+cur);
+                if(size>this.fileSizeLimit){
+                    this.$emit('on-check-error', checkErrorCode.fileSizeOverFlow);
+                    return false;
+                }
+                //单文件校验（只需要校验当前新加入的文件）
+                acceptList.forEach(file => {
+                    this.checkFile(file,fileList);
+                });
+                return true;
+            },
+            //单文件属性校验 校验不通过只是会在上传时过滤掉该文件(因为上传只上传初始化状态的文件)
+            checkFile:function(file,fileList = this.getFileListByStatus(statusCode.checkError,false)){
+                let sign = true;
+                //校验单文件类型
+                if(file.length>this.fileSingleSizeLimit){
+                    sign = false;
+                    //将文件状态标记为校验错误状态
+                    this.statusList[file.unique] = statusCode.checkError;
+                    this.$emit('on-check-error', checkErrorCode.singleFileSizeOverFlow,file);
+                }
+                //校验文件重复
+                if(fileList.filter(item =>item.unique !== file.unique && item.name === file.name ).length>0){
+                    sign = false;
+                    //将文件状态标记为校验错误状态
+                    this.statusList[file.unique] = statusCode.checkError;
+                    this.$emit('on-check-error', checkErrorCode.fileRepeat,file);
+                }
+                //如果不存在该参数，直接跳过文件类型检验
+                if(!this.accept) return sign;
+                //校验文件类型
+                let acceptArr = this.accept.split(',');
+                //不含有该类型有两种情况，一种是输入时选择了*即接收所有，另一种是不接受该类型 这里不考虑随意传值的情况
+                if(acceptArr.indexOf(file.type) === -1){
+                    let type = file.type.split('/')[0];
+                    acceptArr = acceptArr.filter(item => item.startsWith(type));
+                    if(acceptArr.filter(item => item.endsWith('*')).length===0){
+                        this.statusList[file.unique] = statusCode.checkError;
+                        this.$emit('on-check-error', checkErrorCode.fileTypeError,file);
+                    }
+                }
+                return sign;
+            },
+            //前端直传上传前的方法
+            beforeUpload: function (item, data = this.params, headers) {
+                this.ajaxGetPolicy(data, headers).then(req => {
+                    this.myUploadUrl = req.ossUrl;
+                    data = $.extend(data, req.policy);
+                    data.key = data.key + '/' + commUtils.getUUid();
+                    headers['Access-Control-Allow-Origin'] = "*";
+                }, e => {
+                    console.log(e)
+                })
+            },
+            //初始化文件状态  只需要对新增入的文件操作
+            initFileStatus: function (fileList) {
+                fileList.forEach(file => {
+                    //给文件添加唯一键
+                    //设置只读属性作为文件标识
+                    Object.defineProperty(file, "unique", {
+                        value: URL.createObjectURL(file),
+                        writable: false,
+                        enumerable: true,
+                        configurable: true
+                    });
+                    //设置状态为初始化状态
+                    this.$set(this.statusList, file.unique, statusCode.init);
+                    this.$set(this.processList, file.unique, 0);
+                    //给文件创建回显连接
+                    if ((/^image\/.*$/i.test(file.type))) {
+                        let fileReader = new FileReader();
+                        fileReader.readAsDataURL(file);
+                        fileReader.onload = function (e) {
+                            file.src = e.target.result;
+                        };
+                    } else {
+                        if(this.defaultImgUrl){
+                            file.src = this.defaultImgUrl;
+                        }
+                        file.src = '/img/defaultImg.jpg';
+                    }
+                });
+            },
+            initDropArea: function (selector = this.dropArea) {
+                if (!selector) return;
+                let dropArea = document.querySelector(selector);
+                let eventFun = e => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                };
+                dropArea.addEventListener('dragenter', eventFun, false);
+                dropArea.addEventListener('dragover', eventFun, false);
+                dropArea.addEventListener('drop', this.onDrop, false);
+            },
+            //传入文件列表上传文件  在非自动上传的情况下，直接调用这个方法手动上传
+            uploadFiles: function (fileList = this.getFileListByStatus(statusCode.init)) {
+                fileList.forEach(file => {
+                    this.uploadFile(file);
+                });
+            },
+            //单文件上传  也是对外提供的重新上传方法  必须是控件中已经存在的文件
+            uploadFile: function (file) {
+                let headers = {};
+                let data = new FormData();
+                if (this.serverUpload)
+                    this.$emit('on-upload-before-send', file, data, headers);
+                else {
+                    this.beforeUpload(file, this.params, headers);
+                    this.$emit('on-upload-before-send', file, data, headers);
+                }
+                for (let key in this.params) {
+                    if (this.params.hasOwnProperty(key))
+                        data.append(key, this.params[key]);
+                }
+                data.append("file", file);
+                this.ajaxUploadFile(data, headers, file.unique).then(req => {
+                    layer.msg("上传成功");
+                    this.$emit('on-upload-success', file, req);
+                    this.statusList[file.unique] = statusCode.uploadSuccess;
+                }, e => {
+                    console.log(e);
+                    this.statusList[file.unique] = statusCode.uploadError;
+                    this.processList[file.unique] = 0;
+                    layer.msg("上传失败");
+                    this.$emit('on-upload-error', file, e);
+                })
+            },
+            //对外提供的方法  从组件中彻底删除文件
+            removeFile:function(file){
+                this.fileList = this.fileList.filter(item => item.unique!==file.unique);
+                delete this.statusList[file.unique];
+                delete this.processList[file.unique];
+                console.log(this.statusList);
+            },
+            //文件拖拽上传
+            onDrop: function (e) {
+                if (!this.initStatus) return;
+                e.stopPropagation();
+                e.preventDefault();
+                let acceptFiles = [...e.dataTransfer.files];
+                this.initFileStatus(acceptFiles);
+                this.fileList.push(...acceptFiles);
+                if(!this.checkAllFile(acceptFiles)) return;
+                if (!this.autoUpload) return;
+                this.uploadFiles();
+            },
+            btnClick: function (e) {
+                if (!this.initStatus) return;
+                let acceptFiles = [...e.currentTarget.files];
+                e.currentTarget.value = '';
+                this.initFileStatus(acceptFiles);
+                this.fileList.push(...acceptFiles);
+                if(!this.checkAllFile(acceptFiles)) return;
+                if (!this.autoUpload) return;
+                this.uploadFiles();
+            }
+        },
+        mounted: function () {
+            this.checkData();
+            this.initDropArea();
+        }
+    });
+    let app = new Vue({
+        el: '#app',
+        data() {
+            return {
+                fileList: [],
+                frontUpload: false,
+                uploadParams: {
+                    oosDirectory: 'myFiles'
+                }
+            }
+        },
+        methods: {
+            uploadBeforeSend: function (file, data, header) {
+                console.log(file, header, data)
+            },
+            uploadError: function (file, e) {
+
+            },
+            uploadSuccess: function (file, req) {
+
+            },
+            checkError: function (errorCode,file) {
+                //let comArr = this.$refs['btn1'];
+                switch (errorCode){
+                    case checkErrorCode.fileNumOverFlow:
+                        layer.msg('文件数目超出上限');
+                        break;
+                    case checkErrorCode.fileSizeOverFlow:
+                        layer.msg('文件长度超出上限');
+                        break;
+                    case checkErrorCode.singleFileSizeOverFlow:
+                        layer.msg(`文件${file.name}长度超出上限`);
+                        break;
+                    case checkErrorCode.fileRepeat:
+                        //comArr.removeFile(file);
+                        layer.msg(`文件${file.name}已经上传`);
+                        break;
+                    case checkErrorCode.fileTypeError:
+                        layer.msg(`文件${file.name}类型错误`);
+                        break;
+                }
+            }
+        }
+    });
+
+</script>
+</body>
+</html>

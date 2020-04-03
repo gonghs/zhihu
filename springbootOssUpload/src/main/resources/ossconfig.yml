@@ -1,0 +1,9 @@
+#我的通道地址，映射向本地的8680端口,为方便回调也将本地的启动端口改为8680
+ALIYUNCALLBACKHOST: http://iceinsist-maple.ticp.io:26876
+myconfig.aliyun:
+  accessKey: '你的accessKey'
+  secretKey: '你的secretKey'
+  ossEndPoint: oss-cn-hangzhou.aliyuncs.com
+  bucket: ice-maple
+  callbackUrl: ${ALIYUNCALLBACKHOST}/upload/uploadCallback
+

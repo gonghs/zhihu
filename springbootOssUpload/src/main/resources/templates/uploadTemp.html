@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="fileListTemplate">
+<textarea id="fileList" style="display:none">
+{#foreach $T as pic}
+    <div class="queueList" style="height: 40px">
+        <ul class="filelist"></ul>
+    </div>
+{#/for}
+</textarea>
+</div>
