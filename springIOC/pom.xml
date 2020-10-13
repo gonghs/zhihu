@@ -29,7 +29,7 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.12</version>
+            <version>4.13.1</version>
         </dependency>
         <!-- 4.Spring test依赖：方便做单元测试和集成测试 -->
         <dependency>
